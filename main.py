@@ -1,11 +1,12 @@
 import os
+import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatPermissions
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, ChatMemberHandler
 from telegram.constants import ParseMode
 
-# Lấy các biến môi trường từ Render
+# Lấy các biến môi trường
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
-CHANNEL_USERNAME = os.environ.get('CHANNEL_USERNAME') # VD: @myawesomechannel
+CHANNEL_USERNAME = os.environ.get('CHANNEL_USERNAME')
 
 # Hàm xử lý khi có thành viên mới tham gia nhóm
 async def handle_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -49,14 +50,11 @@ async def handle_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "2️⃣ Tham gia kênh của chúng tôi.\\n"
             "3️⃣ Quay lại đây và nhấn **'Đã Tham Gia'** để xác minh."
         )
-        welcome_msg = await update.message.reply_text(
+        await update.message.reply_text(
             welcome_text,
             reply_markup=reply_markup,
             parse_mode=ParseMode.MARKDOWN_V2
         )
-
-        # Lưu ID tin nhắn để có thể xóa sau này (tùy chọn)
-        context.user_data[f"welcome_msg_id_{user_id}"] = welcome_msg.message_id
 
 # Hàm xử lý khi người dùng nhấn nút "Đã Tham Gia"
 async def handle_verification_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -106,15 +104,20 @@ async def handle_verification_button(update: Update, context: ContextTypes.DEFAU
         print(f"Lỗi khi kiểm tra thành viên kênh: {e}")
         await query.answer("❌ Có lỗi xảy ra. Vui lòng thông báo cho Quản trị viên.", show_alert=True)
 
-# Hàm xử lý lệnh /start (tùy chọn, để test bot)
+# Hàm xử lý lệnh /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Tôi là bot xác minh thành viên! Thêm tôi vào nhóm và cấp quyền Admin để hoạt động.")
 
+async def post_init(application: Application):
+    await application.bot.set_my_commands([
+        ("start", "Khởi động bot"),
+    ])
+
 def main():
     # Khởi tạo Application
-    application = Application.builder().token(BOT_TOKEN).build()
+    application = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
 
-    # Thêm Handlers
+    # Thêm Handlers - SỬA LẠI CHO PHIÊN BẢN 20.x
     application.add_handler(ChatMemberHandler(handle_new_member, ChatMemberHandler.CHAT_MEMBER))
     application.add_handler(CallbackQueryHandler(handle_verification_button, pattern="^check_"))
     application.add_handler(CommandHandler("start", start))

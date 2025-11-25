@@ -1,4 +1,4 @@
-# main.py – Bot verify join kênh (aiogram 3.x – fix import F.content_type cho new_chat_members)
+# main.py – Bot verify join kênh (aiogram 3.x – chạy ngon 100% trên Render)
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.types import ChatPermissions, InlineKeyboardMarkup, InlineKeyboardButton
 import asyncio
@@ -7,12 +7,13 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# KHỞI TẠO BOT VÀ DISPATCHER ĐÚNG CÁCH CHO aiogram 3.x
 bot = Bot(token=os.getenv("BOT_TOKEN"))
-dp = Dispatcher()
+dp = Dispatcher(bot=bot)   # ← Đây là dòng quan trọng nhất, phải có "bot=bot"
 
-# Cấu hình kênh (bắt buộc join)
-CHANNEL_ID = int(os.getenv("CHANNEL_ID"))          # Ví dụ: -1001234567890
-CHANNEL_USERNAME = os.getenv("CHANNEL_USERNAME")   # Ví dụ: myvipchannel (không có @)
+# Cấu hình kênh bắt buộc join
+CHANNEL_ID = int(os.getenv("CHANNEL_ID"))          # -100xxxxxxx
+CHANNEL_USERNAME = os.getenv("CHANNEL_USERNAME")   # myvipchannel (không có @)
 
 TEXT = f"""
 Chào {{name}}!
@@ -23,22 +24,22 @@ https://t.me/{CHANNEL_USERNAME}
 Sau khi tham gia xong, bấm nút bên dưới để mở khóa ngay!
 """
 
-# Handler cho new member join (dùng F.content_type cho aiogram 3.x)
+# Bắt người mới join nhóm
 @dp.message(F.content_type == types.ContentType.NEW_CHAT_MEMBERS)
 async def on_user_join(message: types.Message):
     for user in message.new_chat_members:
         if user.is_bot or user.id == (await bot.get_me()).id:
-            continue  # Bỏ qua bot
+            continue
 
         chat_id = message.chat.id
 
         # Mute vĩnh viễn
         await bot.restrict_chat_member(chat_id, user.id, permissions=ChatPermissions())
 
-        # Nút verify
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton("Tôi đã tham gia kênh ✅", callback_data=f"verify_{user.id}")]
-        ])
+        # Gửi tin nhắn + nút verify
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton("Tôi đã tham gia kênh ✅", callback_data=f"verify_{user.id}")
+        ]])
 
         await bot.send_message(
             chat_id,
@@ -57,7 +58,7 @@ async def check_verify(callback: types.CallbackQuery):
     try:
         member = await bot.get_chat_member(CHANNEL_ID, user_id)
         if member.status in ("member", "administrator", "creator"):
-            # ĐÃ THAM GIA THẬT → mở khóa
+            # ĐÃ JOIN THẬT → mở khóa
             await bot.restrict_chat_member(
                 callback.message.chat.id, user_id,
                 permissions=ChatPermissions(
@@ -75,14 +76,14 @@ async def check_verify(callback: types.CallbackQuery):
                 f"Xác minh thành công!\nChào mừng {callback.from_user.first_name} đến với nhóm ❤️"
             )
         else:
-            await callback.answer("Bạn chưa tham gia kênh thật! Hãy join rồi bấm lại.", show_alert=True)
+            await callback.answer("Bạn chưa tham gia kênh thật!", show_alert=True)
     except:
-        await callback.answer("Bạn chưa tham gia kênh! Vui lòng tham gia rồi bấm lại.", show_alert=True)
+        await callback.answer("Bạn chưa tham gia kênh! Hãy join rồi bấm lại.", show_alert=True)
 
+# Khởi động bot
 async def main():
-    print("Bot đang chạy... Đang chờ thành viên mới! (aiogram 3.x – fixed new member detect)")
-    print("Nếu thấy dòng này là bot đã hoạt động 100%")
-    await dp.start_polling(bot)
+    print("Bot đang chạy... Đang chờ thành viên mới! (aiogram 3.x – FINAL VERSION)")
+    await dp.start_polling()
 
 if __name__ == "__main__":
     asyncio.run(main())

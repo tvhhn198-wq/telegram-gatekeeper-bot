@@ -83,7 +83,7 @@ async def check_verify(callback: types.CallbackQuery):
 # Khởi động bot
 async def main():
     print("Bot đang chạy... Đang chờ thành viên mới! (aiogram 3.x – FINAL VERSION)")
-    await dp.start_polling()
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())

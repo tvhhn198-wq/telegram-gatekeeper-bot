@@ -8,8 +8,8 @@ from telegram.ext import (
     Filters,
 )
 
-TOKEN = os.environ["8531113071:AAHYuQN_nBTAZ-pdmeGQje4q_7X0TQICZLI"]
-CHANNEL_ID = os.environ["-1002121982280"]   # dạng -100xxxxxxxxxx
+TOKEN = os.environ["8531113071xxxx:"]
+CHANNEL_ID = os.environ["-1002xxx"]   # dạng -100xxxxxxxxxx
 
 bot = Bot(TOKEN)
 

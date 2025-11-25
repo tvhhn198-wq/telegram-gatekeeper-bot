@@ -1,62 +1,127 @@
-# main.py – WEBHOOK VERSION (Render free chạy ngon 100%, không bao giờ Conflict)
-from aiogram import Bot, Dispatcher, types, F
-from aiogram.types import ChatPermissions, InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.webhook.aiohttp_server import SimpleRequestHandler, run_app
-import aiohttp
 import os
-from dotenv import load_dotenv
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatPermissions
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, ChatMemberHandler
+from telegram.constants import ParseMode
 
-load_dotenv()
+# Lấy các biến môi trường từ Render
+BOT_TOKEN = os.environ.get('BOT_TOKEN')
+CHANNEL_USERNAME = os.environ.get('CHANNEL_USERNAME') # VD: @myawesomechannel
 
-bot = Bot(token=os.getenv("BOT_TOKEN"))
-dp = Dispatcher()
+# Hàm xử lý khi có thành viên mới tham gia nhóm
+async def handle_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Kiểm tra khi có thành viên mới và gửi thông báo chào mừng."""
+    # Chỉ xử lý trong các nhóm, tránh xử lý trong chat riêng
+    if update.effective_chat.type not in ["group", "supergroup"]:
+        return
 
-CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
-CHANNEL_USERNAME = os.getenv("CHANNEL_USERNAME")
+    for member in update.message.new_chat_members:
+        # Nếu thành viên mới chính là bot, bỏ qua
+        if member.id == context.bot.id:
+            continue
 
-TEXT = f"""
-Chào {{name}}! 
+        user_id = member.id
+        user_name = member.first_name
 
-Để được chat trong nhóm, bạn phải tham gia kênh:
-https://t.me/{CHANNEL_USERNAME}
+        # 1. HẠN CHẾ THÀNH VIÊN MỚI (chỉ cho phép xem)
+        await context.bot.restrict_chat_member(
+            chat_id=update.effective_chat.id,
+            user_id=user_id,
+            permissions=ChatPermissions(
+                can_send_messages=False,
+                can_send_media_messages=False,
+                can_send_other_messages=False,
+                can_add_web_page_previews=False
+            )
+        )
 
-Sau khi tham gia xong, bấm nút bên dưới để mở khóa ngay!
-"""
+        # 2. TẠO NÚT ĐĂNG KÝ
+        keyboard = [
+            [InlineKeyboardButton("✅ Đăng ký Kênh", url=f"https://t.me/{CHANNEL_USERNAME[1:]}")],
+            [InlineKeyboardButton("🔐 Đã Tham Gia", callback_data=f"check_{user_id}")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
 
-@dp.message(F.new_chat_members)
-async def on_user_join(message: types.Message):
-    for user in message.new_chat_members:
-        if user.is_bot or user.id == (await bot.get_me()).id: continue
-        await bot.restrict_chat_member(message.chat.id, user.id, permissions=ChatPermissions())
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton("Tôi đã tham gia kênh ✅", callback_data=f"verify_{user.id}")]])
-        await bot.send_message(message.chat.id, TEXT.format(name=user.first_name or "bạn"), reply_markup=keyboard, disable_web_page_preview=True)
+        # 3. GỬI TIN NHẮN CHÀO MỪNG
+        welcome_text = (
+            f"Chào mừng [{user_name}](tg://user?id={user_id}) đến với nhóm!\\n\\n"
+            "⚠️ **Để mở khóa quyền chat, vui lòng:**\\n"
+            "1️⃣ Nhấn nút **'Đăng ký Kênh'** bên dưới.\\n"
+            "2️⃣ Tham gia kênh của chúng tôi.\\n"
+            "3️⃣ Quay lại đây và nhấn **'Đã Tham Gia'** để xác minh."
+        )
+        welcome_msg = await update.message.reply_text(
+            welcome_text,
+            reply_markup=reply_markup,
+            parse_mode=ParseMode.MARKDOWN_V2
+        )
 
-@dp.callback_query(F.data.startswith("verify_"))
-async def check_verify(callback: types.CallbackQuery):
-    user_id = int(callback.data.split("_")[1])
-    if callback.from_user.id != user_id:
-        return await callback.answer("Không phải nút của bạn!", show_alert=True)
+        # Lưu ID tin nhắn để có thể xóa sau này (tùy chọn)
+        context.user_data[f"welcome_msg_id_{user_id}"] = welcome_msg.message_id
+
+# Hàm xử lý khi người dùng nhấn nút "Đã Tham Gia"
+async def handle_verification_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Kiểm tra xem user đã tham gia kênh chưa."""
+    query = update.callback_query
+    user_id = int(query.data.split('_')[1]) # Lấy user_id từ callback_data
+    callback_user_id = query.from_user.id
+
+    # Chỉ cho phép người dùng được nhắc đến nhấn nút
+    if callback_user_id != user_id:
+        await query.answer("Đây không phải là yêu cầu của bạn!", show_alert=True)
+        return
+
+    await query.answer()
+
     try:
-        member = await bot.get_chat_member(CHANNEL_ID, user_id)
-        if member.status in ("member", "administrator", "creator"):
-            await bot.restrict_chat_member(callback.message.chat.id, user_id, permissions=ChatPermissions(can_send_messages=True, can_send_media_messages=True, can_send_audios=True, can_send_documents=True, can_send_photos=True, can_send_videos=True, can_send_voice_notes=True, can_add_web_page_previews=True))
-            await callback.message.edit_text(f"Xác minh thành công!\nChào mừng {callback.from_user.first_name} đến với nhóm ❤️")
+        # QUAN TRỌNG: Kiểm tra trạng thái thành viên trong kênh
+        chat_member = await context.bot.get_chat_member(chat_id=CHANNEL_USERNAME, user_id=user_id)
+        
+        # Kiểm tra nếu trạng thái là 'member', 'administrator', hoặc 'creator'
+        if chat_member.status in ['member', 'administrator', 'creator']:
+            # XÓA HẠN CHẾ - MỞ KHÓA CHAT
+            await context.bot.restrict_chat_member(
+                chat_id=query.message.chat_id,
+                user_id=user_id,
+                permissions=ChatPermissions(
+                    can_send_messages=True,
+                    can_send_media_messages=True,
+                    can_send_other_messages=True,
+                    can_add_web_page_previews=True
+                )
+            )
+
+            # Sửa tin nhắn chào mừng thành thông báo thành công
+            success_text = f"Chào mừng [{query.from_user.first_name}](tg://user?id={user_id}) đã chính thức tham gia nhóm! Cảm ơn bạn đã đăng ký kênh\\! 🎉"
+            await query.edit_message_text(
+                success_text,
+                parse_mode=ParseMode.MARKDOWN_V2
+            )
+
         else:
-            await callback.answer("Bạn chưa tham gia kênh thật!", show_alert=True)
-    except:
-        await callback.answer("Bạn chưa tham gia kênh! Hãy join rồi bấm lại.", show_alert=True)
+            # Nếu user chưa tham gia kênh
+            await query.answer("❌ Bạn chưa tham gia kênh. Vui lòng tham gia rồi thử lại!", show_alert=True)
 
-async def on_startup(app):
-    webhook_url = f"https://{os.getenv('RENDER_EXTERNAL_URL')}/webhook"
-    await bot.set_webhook(webhook_url)
-    print(f"Webhook đã được set: {webhook_url}")
+    except Exception as e:
+        # Xử lý lỗi, có thể bot không có quyền admin trong kênh
+        print(f"Lỗi khi kiểm tra thành viên kênh: {e}")
+        await query.answer("❌ Có lỗi xảy ra. Vui lòng thông báo cho Quản trị viên.", show_alert=True)
 
-async def main():
-    app = aiohttp.web.Application()
-    handler = SimpleRequestHandler(dispatcher=dp, bot=bot)
-    handler.register(app, path="/webhook")
-    app.on_startup.append(on_startup)
-    return app
+# Hàm xử lý lệnh /start (tùy chọn, để test bot)
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Tôi là bot xác minh thành viên! Thêm tôi vào nhóm và cấp quyền Admin để hoạt động.")
 
-if __name__ == "__main__":
-    run_app(main(), host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+def main():
+    # Khởi tạo Application
+    application = Application.builder().token(BOT_TOKEN).build()
+
+    # Thêm Handlers
+    application.add_handler(ChatMemberHandler(handle_new_member, ChatMemberHandler.CHAT_MEMBER))
+    application.add_handler(CallbackQueryHandler(handle_verification_button, pattern="^check_"))
+    application.add_handler(CommandHandler("start", start))
+
+    # Khởi chạy Bot
+    print("Bot is running...")
+    application.run_polling()
+
+if __name__ == '__main__':
+    main()

@@ -1,6 +1,6 @@
-# main.py – Bot verify join kênh (fix detect new member bằng message handler)
+# main.py – Bot verify join kênh (chỉ cần BOT_TOKEN)
 from aiogram import Bot, Dispatcher, types
-from aiogram.filters import ContentTypeFilter
+from aiogram.filters import ChatMemberUpdatedFilter, IS_NOT_MEMBER, IS_MEMBER
 from aiogram.types import ChatPermissions, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram import F
 import asyncio
@@ -25,29 +25,26 @@ https://t.me/{CHANNEL_USERNAME}
 Sau khi tham gia xong, bấm nút bên dưới để mở khóa ngay!
 """
 
-# Handler cho new member join (dùng message handler bắt new_chat_members)
-@dp.message(ContentTypeFilter(content_types=["new_chat_members"]))
-async def on_user_join(message: types.Message):
-    for user in message.new_chat_members:
-        if user.is_bot or user.id == (await bot.get_me()).id:
-            continue  # Bỏ qua bot
+# Khi có người mới vào nhóm
+@dp.chat_member(ChatMemberUpdatedFilter(IS_NOT_MEMBER >> IS_MEMBER))
+async def on_user_join(update: types.ChatMemberUpdated):
+    user = update.new_chat_member.user
+    chat_id = update.chat.id
 
-        chat_id = message.chat.id
+    # Mute vĩnh viễn
+    await bot.restrict_chat_member(chat_id, user.id, permissions=ChatPermissions())
 
-        # Mute vĩnh viễn
-        await bot.restrict_chat_member(chat_id, user.id, permissions=ChatPermissions())
+    # Nút verify
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton("Tôi đã tham gia kênh ✅", callback_data=f"verify_{user.id}")
+    ]])
 
-        # Nút verify
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton("Tôi đã tham gia kênh ✅", callback_data=f"verify_{user.id}")]
-        ])
-
-        await bot.send_message(
-            chat_id,
-            TEXT.format(name=user.first_name or "bạn"),
-            reply_markup=keyboard,
-            disable_web_page_preview=True
-        )
+    await bot.send_message(
+        chat_id,
+        TEXT.format(name=user.first_name or "bạn"),
+        reply_markup=keyboard,
+        disable_web_page_preview=True
+    )
 
 # Khi bấm nút verify
 @dp.callback_query(F.data.startswith("verify_"))
@@ -82,8 +79,7 @@ async def check_verify(callback: types.CallbackQuery):
         await callback.answer("Bạn chưa tham gia kênh! Vui lòng tham gia rồi bấm lại.", show_alert=True)
 
 async def main():
-    print("Bot đang chạy... Đang chờ thành viên mới! (aiogram 3.x – fixed new member detect)")
-    print("Nếu thấy dòng này là bot đã hoạt động 100%")
+    print("Bot đang chạy... Đang chờ thành viên mới!")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
